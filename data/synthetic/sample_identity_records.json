@@ -1,0 +1,20 @@
+{
+  "dataset": "SIH26188 synthetic identity records",
+  "synthetic_only": true,
+  "records": [
+    {
+      "record_id": "SYN-AADHAAR-001",
+      "document_type": "aadhaar",
+      "document_number": "1111 2222 3333",
+      "name": "KAVYA MEHTA",
+      "date_of_birth": "1995"
+    },
+    {
+      "record_id": "SYN-PASSPORT-001",
+      "document_type": "passport",
+      "document_number": "SYNTH-P-000001",
+      "name": "SHARMA",
+      "date_of_birth": "08/04/1987"
+    }
+  ]
+}

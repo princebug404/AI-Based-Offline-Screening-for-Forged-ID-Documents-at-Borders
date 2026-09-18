@@ -1,0 +1,79 @@
+# Python bytecode and local tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Local Python environments
+aenv/
+.venv/
+venv/
+env/
+ENV/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and operating system files
+.idea/
+# .vscode/ is intentionally shareable in this project.
+.vscode/*.local.json
+Thumbs.db
+.DS_Store
+
+# Local databases and SQLite journals
+*.db
+database/*.db
+database/*.db-journal
+database/*.db-wal
+database/*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Generated reports, temporary files, and logs
+storage/reports/
+storage/tmp/
+tmp/
+temp/
+*.tmp
+*.temp
+*.log
+logs/
+
+# Uploaded identity documents and face images
+/uploads/
+storage/uploads/
+
+# Downloaded AI model weights and local model caches
+.insightface/
+.cache/huggingface/
+models/**/*.onnx
+models/**/*.onnx.json
+models/**/*.pt
+models/**/*.pth
+models/**/*.bin
+models/**/*.safetensors
+models/**/*.ckpt
+models/**/*.h5
+models/**/*.tflite
+
+# Frontend dependencies and build caches
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.vite/
+.parcel-cache/

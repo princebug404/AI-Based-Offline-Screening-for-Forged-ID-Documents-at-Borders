@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SIH26188 Document Screening</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <main class="shell">
+        <section class="intro">
+            <p class="eyebrow">SIH26188</p>
+            <h1>Document screening</h1>
+            <p class="lede">Upload an image to run the existing OCR and document classification workflow.</p>
+        </section>
+
+        <section class="panel" aria-labelledby="upload-heading">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">Screen a document</p>
+                    <h2 id="upload-heading">Choose an image</h2>
+                </div>
+                <span class="badge">Local prototype</span>
+            </div>
+
+            <form id="screening-form">
+                <label class="drop-zone" for="document-file">
+                    <span class="upload-icon" aria-hidden="true">+</span>
+                    <span class="drop-title">Select a document image</span>
+                    <span class="drop-help">PNG, JPG, JPEG, BMP, or TIFF</span>
+                    <input id="document-file" name="file" type="file" accept=".png,.jpg,.jpeg,.bmp,.tiff" required>
+                </label>
+                <p id="selected-file" class="file-name" aria-live="polite">No image selected</p>
+                <button id="submit-button" type="submit">Upload and process</button>
+            </form>
+
+            <div id="status" class="status" role="status" aria-live="polite"></div>
+            <div id="error" class="message error" role="alert" hidden></div>
+        </section>
+
+        <section class="panel face-panel" aria-labelledby="face-heading">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">Client-only preview</p>
+                    <h2 id="face-heading">Live Face Scan</h2>
+                </div>
+                <span class="badge">Not uploaded</span>
+            </div>
+            <p class="face-help">Capture a still image for local preview. This image is not sent to the server.</p>
+            <div class="camera-stage">
+                <video id="camera-preview" autoplay playsinline muted hidden></video>
+                <img id="captured-face" alt="Captured face preview" hidden>
+                <p id="camera-placeholder" class="camera-placeholder">Camera is off</p>
+            </div>
+            <canvas id="face-canvas" hidden></canvas>
+            <label class="face-upload" for="face-file">
+                <span>Upload Face Image for Demo</span>
+                <input id="face-file" type="file" accept=".png,.jpg,.jpeg,.bmp,.tiff">
+            </label>
+            <p id="face-source" class="file-name" aria-live="polite">No face image selected</p>
+            <div class="camera-controls" role="group" aria-label="Live Face Scan controls">
+                <button id="start-camera" type="button">Start Camera</button>
+                <button id="capture-face" type="button" disabled>Capture Face</button>
+                <button id="retake-face" type="button" disabled>Retake</button>
+                <button id="stop-camera" type="button" disabled>Stop Camera</button>
+                <button id="remove-face" type="button" disabled>Remove Face Image</button>
+            </div>
+            <div id="camera-status" class="status" role="status" aria-live="polite"></div>
+            <div id="camera-error" class="message error" role="alert" hidden></div>
+        </section>
+
+        <section id="result-panel" class="panel result-panel" aria-labelledby="result-heading" hidden>
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">Latest response</p>
+                    <h2 id="result-heading">Processing result</h2>
+                </div>
+                <span id="result-status" class="badge"></span>
+            </div>
+            <dl id="result-fields" class="result-fields"></dl>
+            <details>
+                <summary>View complete response</summary>
+                <pre id="result-json"></pre>
+            </details>
+        </section>
+    </main>
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>
