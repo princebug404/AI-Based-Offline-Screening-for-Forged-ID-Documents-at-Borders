@@ -2,6 +2,7 @@
 
 import os
 import uuid
+import logging
 from datetime import datetime, timezone
 
 from flask import Blueprint, request, jsonify, current_app
@@ -16,6 +17,21 @@ document_bp = Blueprint('documents', __name__)
 # Module-level audit service instance (in-memory, shared across requests)
 _audit_service = AuditService()
 _face_verifier = FaceVerifier()
+logger = logging.getLogger(__name__)
+
+
+def _safe_processing_error(error):
+    """Return only known user-facing processing errors from stored results."""
+    safe_errors = {
+        "Document OCR failed",
+        "OCR completed but returned no readable text",
+        "Document classification was unknown",
+        "Document classification confidence is below the minimum threshold",
+        "Document processing failed",
+    }
+    return error if error in safe_errors else (
+        "Document processing failed" if error else None
+    )
 
 
 def _allowed_file(filename, allowed_extensions):
@@ -57,6 +73,7 @@ def upload_document():
         return jsonify({"error": "No file selected"}), 400
 
     original_filename = file.filename
+    safe_original = secure_filename(original_filename)
 
     extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
     if extension == 'pdf':
@@ -76,7 +93,6 @@ def upload_document():
 
     # --- Generate unique document ID and safe filename ---
     document_id = str(uuid.uuid4())
-    safe_original = secure_filename(original_filename)
     # Prefix with document ID to guarantee uniqueness on disk
     stored_filename = f"{document_id}_{safe_original}"
     file_extension = extension
@@ -89,15 +105,16 @@ def upload_document():
     try:
         file.save(file_path)
         file_size = os.path.getsize(file_path)
-    except Exception as e:
-        return jsonify({"error": "Failed to save file", "detail": str(e)}), 500
+    except Exception:
+        logger.exception("Document upload file save failed")
+        return jsonify({"error": "Unable to save the uploaded document"}), 500
 
     # --- Persist metadata to database ---
     upload_timestamp = datetime.now(timezone.utc).isoformat()
 
     document_record = {
         "id": document_id,
-        "original_filename": original_filename,
+        "original_filename": safe_original,
         "stored_filename": stored_filename,
         "file_type": file_extension,
         "file_size_bytes": file_size,
@@ -109,11 +126,15 @@ def upload_document():
         db_path = current_app.config['DATABASE_PATH']
         repo = DocumentRepository(db_path)
         repo.save_document(document_record)
-    except Exception as e:
+    except Exception:
+        logger.exception("Document metadata persistence failed")
         # Clean up the saved file if database write fails
         if os.path.exists(file_path):
-            os.remove(file_path)
-        return jsonify({"error": "Failed to save document metadata", "detail": str(e)}), 500
+            try:
+                os.remove(file_path)
+            except OSError:
+                logger.exception("Uploaded document cleanup failed")
+        return jsonify({"error": "Unable to save document metadata"}), 500
 
     # --- Log audit event (best-effort; upload is still valid if audit fails) ---
     audit_result = None
@@ -124,15 +145,16 @@ def upload_document():
             "file_type": file_extension,
             "action": "upload",
         })
-    except Exception as e:
+    except Exception:
         # Audit failure is logged but does not fail the upload
-        audit_error = str(e)
+        logger.exception("Document upload audit logging failed")
+        audit_error = True
 
     # --- Build response (no absolute filesystem paths exposed) ---
     response = {
         "document_id": document_id,
         "status": "uploaded",
-        "filename": original_filename,
+        "filename": safe_original,
         "file_type": file_extension,
         "file_size_bytes": file_size,
         "upload_timestamp": upload_timestamp,
@@ -165,8 +187,9 @@ def document_status(document_id):
         db_path = current_app.config['DATABASE_PATH']
         repo = DocumentRepository(db_path)
         doc = repo.get_document(document_id)
-    except Exception as e:
-        return jsonify({"error": "Database error", "detail": str(e)}), 500
+    except Exception:
+        logger.exception("Document status lookup failed")
+        return jsonify({"error": "Unable to retrieve document status"}), 500
 
     if doc is None:
         return jsonify({"error": "Document not found"}), 404
@@ -174,7 +197,7 @@ def document_status(document_id):
     # Return metadata without exposing server filesystem paths
     return jsonify({
         "document_id": doc["id"],
-        "filename": doc["original_filename"],
+        "filename": secure_filename(doc["original_filename"]),
         "file_type": doc["file_type"],
         "file_size_bytes": doc["file_size_bytes"],
         "upload_timestamp": doc["upload_timestamp"],
@@ -209,8 +232,9 @@ def process_document(document_id):
             current_app.config['SYNTHETIC_IDENTITY_DB_PATH'],
         )
         result = service.process_document(document_id)
-    except Exception as e:
-        return jsonify({"error": "Processing failed", "detail": str(e)}), 500
+    except Exception:
+        logger.exception("Document processing request failed")
+        return jsonify({"error": "Document processing failed"}), 500
 
     if not result.get("success"):
         error_msg = result.get("error", "Processing failed")
@@ -270,13 +294,15 @@ def get_processing_result(document_id):
             "extracted_fields": fields,
             "ocr_engine": result.get("ocr_engine"),
             "ocr_confidence": result.get("ocr_confidence"),
-            "processing_error": result.get("processing_error"),
+            "processing_error": _safe_processing_error(result.get("processing_error")),
+            "identity_match": result.get("identity_match"),
             "processed_at": result.get("processed_at"),
             "processing_status": doc["processing_status"],
         }), 200
 
-    except Exception as e:
-        return jsonify({"error": "Failed to retrieve results", "detail": str(e)}), 500
+    except Exception:
+        logger.exception("Document result lookup failed")
+        return jsonify({"error": "Unable to retrieve document results"}), 500
 
 
 @document_bp.route('/<document_id>/compare-face', methods=['POST'])
@@ -316,12 +342,14 @@ def compare_face(document_id):
             live_image,
             threshold=current_app.config['FACE_MATCH_THRESHOLD'],
         )
+        if result.get('reason', '').startswith('Face comparison unavailable:'):
+            result['reason'] = 'Face comparison is unavailable.'
         result['document_id'] = document_id
         return jsonify(result), 200
-    except Exception as error:
+    except Exception:
+        logger.exception("Face comparison request failed")
         return jsonify({
             "error": "Face comparison failed",
-            "detail": str(error),
         }), 422
 
 

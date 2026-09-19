@@ -28,7 +28,9 @@ class FaceVerifier:
 		}
 
 		try:
-			document_image, document_faces = self.detector.detect(document_source)
+			document_image, document_faces = self.detector.detect_document_portrait(
+				document_source
+			)
 			live_image_array, live_faces = self.detector.detect(live_image)
 			base['document_face_count'] = len(document_faces)
 			base['live_face_count'] = len(live_faces)

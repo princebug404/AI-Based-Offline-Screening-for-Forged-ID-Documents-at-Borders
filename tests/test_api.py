@@ -53,6 +53,36 @@ class TestHealthEndpoint(unittest.TestCase):
         self.assertIn('timestamp', data)
 
 
+class TestDebugConfiguration(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.config = {
+            'TESTING': True,
+            'DATABASE_PATH': os.path.join(self.test_dir, 'test.db'),
+            'UPLOAD_FOLDER': os.path.join(self.test_dir, 'uploads'),
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    @patch.dict(os.environ, {'FLASK_DEBUG': ''}, clear=False)
+    def test_debug_is_disabled_by_default(self):
+        app = create_app(self.config)
+        self.assertFalse(app.debug)
+
+    @patch.dict(os.environ, {'FLASK_DEBUG': 'true'}, clear=False)
+    def test_debug_requires_explicit_opt_in(self):
+        app = create_app(self.config)
+        self.assertTrue(app.debug)
+
+    @patch.dict(os.environ, {'FLASK_DEBUG': 'true'}, clear=False)
+    def test_config_override_can_disable_debug(self):
+        config = dict(self.config)
+        config['DEBUG'] = False
+        app = create_app(config)
+        self.assertFalse(app.debug)
+
+
 class TestDocumentUpload(unittest.TestCase):
     """Tests for POST /api/documents/upload."""
 
@@ -227,6 +257,20 @@ class TestDocumentUpload(unittest.TestCase):
         self.assertNotIn(':\\', response_text)
         self.assertNotIn(self.upload_folder, response_text)
 
+    @patch('backend.routes.document_routes.DocumentRepository.save_document',
+           side_effect=RuntimeError('database path C:\\private\\records.db'))
+    def test_upload_database_error_does_not_expose_exception(self, _save_document):
+        response = self.client.post(
+            '/api/documents/upload',
+            data={'file': (io.BytesIO(b'image data'), 'private.png')},
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(response.status_code, 500)
+        response_text = response.data.decode()
+        self.assertIn('Unable to save document metadata', response_text)
+        self.assertNotIn('private', response_text)
+        self.assertNotIn('database path', response_text)
+
 
 class TestDocumentStatus(unittest.TestCase):
     """Tests for GET /api/documents/<document_id>/status."""
@@ -277,6 +321,14 @@ class TestDocumentStatus(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         result = json.loads(response.data)
         self.assertIn('error', result)
+
+    @patch('backend.routes.document_routes.DocumentRepository.get_document',
+           side_effect=RuntimeError('sqlite file C:\\private\\status.db'))
+    def test_status_database_error_does_not_expose_exception(self, _get_document):
+        response = self.client.get('/api/documents/sample/status')
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json['error'], 'Unable to retrieve document status')
+        self.assertNotIn('status.db', response.data.decode())
 
     @patch('backend.services.document_services.OCREngine')
     def test_failed_processing_status_matches_result(self, MockOCREngine):
@@ -345,6 +397,57 @@ class TestDatabasePersistence(unittest.TestCase):
         result = json.loads(status_resp.data)
         self.assertEqual(result['document_id'], doc_id)
         self.assertEqual(result['filename'], 'persist.jpg')
+
+
+class TestRouteErrorHardening(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.app = create_app({
+            'TESTING': True,
+            'DATABASE_PATH': os.path.join(self.test_dir, 'test.db'),
+            'UPLOAD_FOLDER': os.path.join(self.test_dir, 'uploads'),
+            'ALLOWED_EXTENSIONS': {'png', 'jpg', 'jpeg', 'bmp', 'tiff'},
+        })
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    @patch('backend.services.document_services.DocumentProcessingService',
+           side_effect=RuntimeError('model path C:\\private\\model.onnx'))
+    def test_process_route_does_not_expose_exception(self, _service):
+        response = self.client.post('/api/documents/sample/process')
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json['error'], 'Document processing failed')
+        self.assertNotIn('model.onnx', response.data.decode())
+
+    @patch('backend.routes.document_routes.DocumentRepository.get_document',
+           side_effect=RuntimeError('sqlite error at C:\\private\\results.db'))
+    def test_result_route_does_not_expose_exception(self, _get_document):
+        response = self.client.get('/api/documents/sample/result')
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json['error'], 'Unable to retrieve document results')
+        self.assertNotIn('results.db', response.data.decode())
+
+    def test_face_route_does_not_expose_comparison_exception(self):
+        upload = self.client.post(
+            '/api/documents/upload',
+            data={'file': (io.BytesIO(b'image data'), 'document.png')},
+            content_type='multipart/form-data',
+        )
+        document_id = upload.json['document_id']
+        with patch(
+            'backend.routes.document_routes._face_verifier.compare',
+            side_effect=RuntimeError('embedding path C:\\private\\model.onnx'),
+        ):
+            response = self.client.post(
+                f'/api/documents/{document_id}/compare-face',
+                data={'face': (io.BytesIO(b'face bytes'), 'face.png')},
+                content_type='multipart/form-data',
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json['error'], 'Face comparison failed')
+        self.assertNotIn('model.onnx', response.data.decode())
 
 
 class TestDatabaseIntegrity(unittest.TestCase):

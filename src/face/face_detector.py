@@ -41,3 +41,23 @@ class FaceDetector:
 	def detect(self, source):
 		image = self.decode_image(source)
 		return image, self._get_model().get(image)
+
+	def detect_document_portrait(self, source, padding_ratio=0.35):
+		"""Extract and redetect the single portrait region from a document image."""
+		image, document_faces = self.detect(source)
+		if len(document_faces) != 1:
+			return None, []
+
+		face = document_faces[0]
+		x1, y1, x2, y2 = face.bbox.astype(int)
+		width, height = x2 - x1, y2 - y1
+		pad_x, pad_y = int(width * padding_ratio), int(height * padding_ratio)
+		x1 = max(0, x1 - pad_x)
+		y1 = max(0, y1 - pad_y)
+		x2 = min(image.shape[1], x2 + pad_x)
+		y2 = min(image.shape[0], y2 + pad_y)
+		portrait = image[y1:y2, x1:x2]
+		if portrait.size == 0:
+			return None, []
+
+		return portrait, self._get_model().get(portrait)

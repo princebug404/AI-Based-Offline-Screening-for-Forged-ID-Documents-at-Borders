@@ -11,6 +11,13 @@ from backend.routes.document_routes import document_bp
 from database.db import init_db
 
 
+def _debug_from_environment():
+    """Return debug opt-in state without exposing environment values."""
+    return os.environ.get('FLASK_DEBUG', '').strip().lower() in {
+        '1', 'true', 'yes', 'on'
+    }
+
+
 def create_app(config_override=None):
     """
     Flask application factory.
@@ -26,6 +33,9 @@ def create_app(config_override=None):
 
     # Load default configuration
     app.config.from_object(Config)
+
+    # Debug is opt-in; test overrides are applied below afterward.
+    app.config['DEBUG'] = _debug_from_environment()
 
     # Apply any overrides (e.g., test configuration)
     if config_override:
@@ -63,6 +73,6 @@ def create_app(config_override=None):
 
 if __name__ == '__main__':
     app = create_app()
-    # Run on localhost:5000 with debug mode for development
-    app.run(host='127.0.0.1', port=5055, debug=True)
+    # Run on localhost:5055; debug requires explicit FLASK_DEBUG opt-in.
+    app.run(host='127.0.0.1', port=5055, debug=app.config['DEBUG'])
 

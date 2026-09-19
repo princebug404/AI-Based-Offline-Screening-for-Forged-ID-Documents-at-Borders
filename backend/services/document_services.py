@@ -104,7 +104,7 @@ class DocumentProcessingService:
             self.repo.update_status(document_id, "failed")
             return {
                 "success": False,
-                "error": "Uploaded file not found on disk",
+                "error": "Uploaded document was not found",
                 "document_id": document_id,
             }
 
@@ -124,7 +124,7 @@ class DocumentProcessingService:
             self.repo.update_status(document_id, "failed")
             return {
                 "success": False,
-                "error": f"Processing failed: {error}",
+                "error": "Document processing failed",
                 "document_id": document_id,
                 "processing_status": "failed",
             }
@@ -161,13 +161,13 @@ class DocumentProcessingService:
                 "extracted_fields": "{}",
                 "ocr_engine": ocr_result.get("engine", "tesseract"),
                 "ocr_confidence": None,
-                "processing_error": ocr_result.get("error", "OCR failed"),
+                    "processing_error": "Document OCR failed",
             }
             self.repo.save_processing_result_and_status(result_record, "failed")
 
             return {
                 "success": False,
-                "error": ocr_result["error"],
+                "error": "Document OCR failed",
                 "document_id": document_id,
                 "processing_status": "failed",
             }
@@ -224,6 +224,7 @@ class DocumentProcessingService:
             "ocr_engine": ocr_result.get("engine", "tesseract"),
             "ocr_confidence": ocr_result.get("confidence"),
             "processing_error": None,
+            "identity_match": identity_match,
         }
         self.repo.save_processing_result_and_status(result_record, "processed")
 

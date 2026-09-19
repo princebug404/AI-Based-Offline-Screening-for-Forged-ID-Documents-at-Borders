@@ -106,6 +106,54 @@ class TestLedger(unittest.TestCase):
         ledger.chain[1].data = {"event": "TAMPERED"}
         self.assertFalse(ledger.is_chain_valid())
 
+    def test_genesis_tamper_detection(self):
+        """Changing the genesis data or anchor should invalidate the chain."""
+        ledger = Ledger()
+        ledger.chain[0].data = {"event": "TAMPERED"}
+        self.assertFalse(ledger.is_chain_valid())
+
+        ledger = Ledger()
+        ledger.chain[0].previous_hash = "changed-anchor"
+        self.assertFalse(ledger.is_chain_valid())
+
+    def test_stored_hash_tamper_detection(self):
+        """Changing a stored hash should invalidate the chain."""
+        ledger = Ledger()
+        ledger.add_block({"event": "A"})
+        ledger.chain[1].hash = "0" * 64
+        self.assertFalse(ledger.is_chain_valid())
+
+    def test_previous_hash_link_tamper_detection(self):
+        """Breaking a previous-hash link should invalidate the chain."""
+        ledger = Ledger()
+        ledger.add_block({"event": "A"})
+        ledger.add_block({"event": "B"})
+        ledger.chain[2].previous_hash = "broken-link"
+        self.assertFalse(ledger.is_chain_valid())
+
+    def test_removed_interior_block_detection(self):
+        """Removing an interior block should break indexes and links."""
+        ledger = Ledger()
+        ledger.add_block({"event": "A"})
+        ledger.add_block({"event": "B"})
+        ledger.add_block({"event": "C"})
+        del ledger.chain[2]
+        self.assertFalse(ledger.is_chain_valid())
+
+    def test_reordered_block_detection(self):
+        """Reordering blocks should invalidate the sequence and links."""
+        ledger = Ledger()
+        ledger.add_block({"event": "A"})
+        ledger.add_block({"event": "B"})
+        ledger.chain[1], ledger.chain[2] = ledger.chain[2], ledger.chain[1]
+        self.assertFalse(ledger.is_chain_valid())
+
+    def test_empty_chain_is_invalid(self):
+        """A chain with no genesis block is not valid."""
+        ledger = Ledger()
+        ledger.chain.clear()
+        self.assertFalse(ledger.is_chain_valid())
+
     def test_get_chain(self):
         """get_chain should return a list of dictionaries."""
         ledger = Ledger()

@@ -28,6 +28,9 @@ class StubDetector:
 		)
 		return image, self.faces
 
+	def detect_document_portrait(self, source):
+		return self.detect(source)
+
 
 def _face(embedding, score=0.99):
 	return SimpleNamespace(
@@ -51,6 +54,23 @@ class TestFaceVerifier(unittest.TestCase):
 		self.assertEqual(result['decision_threshold'], 0.8)
 		self.assertEqual(result['similarity_metric'], 'cosine')
 		self.assertEqual(result['embedding_model'], 'stub-embedding-model')
+
+	def test_document_portrait_extraction_is_used(self):
+
+		class PortraitOnlyDetector(StubDetector):
+			def __init__(self):
+				super().__init__([_face([1.0, 0.0])])
+				self.portrait_calls = 0
+
+			def detect_document_portrait(self, source):
+				self.portrait_calls += 1
+				return super().detect_document_portrait(source)
+
+		detector = PortraitOnlyDetector()
+		result = FaceVerifier(detector=detector).compare('document', b'live')
+
+		self.assertEqual(result['comparison_status'], 'Match')
+		self.assertEqual(detector.portrait_calls, 1)
 
 	def test_different_faces_return_no_match(self):
 		class DifferentDetector(StubDetector):

@@ -40,6 +40,15 @@ def init_db(db_path):
     try:
         conn.execute(CREATE_DOCUMENTS_TABLE)
         conn.execute(CREATE_PROCESSING_RESULTS_TABLE)
+        columns = {
+            row['name'] for row in conn.execute(
+                "PRAGMA table_info(processing_results)"
+            ).fetchall()
+        }
+        if 'identity_match' not in columns:
+            conn.execute(
+                "ALTER TABLE processing_results ADD COLUMN identity_match TEXT"
+            )
         conn.commit()
     finally:
         conn.close()

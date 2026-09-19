@@ -172,7 +172,33 @@ class DocumentRepository:
         safely_redacted['extracted_fields'] = json.dumps(
             cls._redact_fields(result.get('extracted_fields', {}))
         )
+        safely_redacted['identity_match'] = json.dumps(
+            cls._sanitize_identity_match(result.get('identity_match'))
+        ) if result.get('identity_match') is not None else None
         return safely_redacted
+
+    @staticmethod
+    def _sanitize_identity_match(identity_match):
+        """Keep only synthetic match metadata and field-level outcomes."""
+        if not isinstance(identity_match, dict):
+            return {}
+
+        allowed_statuses = {'Match', 'Mismatch', 'Unavailable'}
+        fields = identity_match.get('fields', {})
+        if not isinstance(fields, dict):
+            fields = {}
+        safe_fields = {
+            field: status
+            for field, status in fields.items()
+            if field in {'document_type', 'document_number', 'name', 'date_of_birth'}
+            and status in allowed_statuses
+        }
+        return {
+            'status': identity_match.get('status'),
+            'record_id': identity_match.get('record_id'),
+            'synthetic_database': identity_match.get('synthetic_database') is True,
+            'fields': safe_fields,
+        }
 
     def save_processing_result(self, result):
         """
@@ -207,8 +233,8 @@ class DocumentRepository:
             INSERT OR REPLACE INTO processing_results
                 (document_id, document_type, confidence, extracted_text,
                  extracted_fields, ocr_engine, ocr_confidence,
-                 processing_error, processed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  processing_error, identity_match, processed_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 safe_result['document_id'],
@@ -219,6 +245,7 @@ class DocumentRepository:
                 safe_result.get('ocr_engine'),
                 safe_result.get('ocr_confidence'),
                 safe_result.get('processing_error'),
+                safe_result.get('identity_match'),
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -272,6 +299,13 @@ class DocumentRepository:
                 result['extracted_fields'] = json.dumps(self._redact_fields(raw_fields))
             else:
                 result['extracted_fields'] = '{}'
+            if result.get('identity_match'):
+                try:
+                    result['identity_match'] = json.loads(result['identity_match'])
+                except (TypeError, ValueError):
+                    result['identity_match'] = None
+            else:
+                result['identity_match'] = None
             return result
         finally:
             conn.close()

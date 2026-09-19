@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import sqlite3
 import shutil
 import tempfile
 import unittest
@@ -11,6 +12,8 @@ from PIL import Image
 from backend.app import create_app
 from backend.config import Config
 from backend.services.identity_matching import SyntheticIdentityMatcher
+from database.db import init_db
+from database.repository import DocumentRepository
 
 
 class TestSyntheticIdentityMatcher(unittest.TestCase):
@@ -145,3 +148,73 @@ class TestSyntheticIdentityProcessing(unittest.TestCase):
         self.assertNotIn('name', identity_match)
         self.assertNotIn('document_number', identity_match)
         self.assertNotIn('date_of_birth', identity_match)
+
+        retrieved = self.client.get(f'/api/documents/{document_id}/result')
+        self.assertEqual(retrieved.status_code, 200)
+        self.assertEqual(
+            json.loads(retrieved.data)['identity_match'],
+            identity_match,
+        )
+
+    def test_legacy_result_without_identity_match_returns_null(self):
+        image = Image.new('RGB', (240, 160), 'white')
+        image_buffer = io.BytesIO()
+        image.save(image_buffer, format='PNG')
+        image_buffer.seek(0)
+        upload = self.client.post(
+            '/api/documents/upload',
+            data={'file': (image_buffer, 'legacy-result.png')},
+            content_type='multipart/form-data',
+        )
+        document_id = json.loads(upload.data)['document_id']
+        repository = DocumentRepository(self.app.config['DATABASE_PATH'])
+        repository.save_processing_result_and_status({
+            'document_id': document_id,
+            'document_type': 'unknown',
+            'confidence': 0.0,
+            'extracted_fields': '{}',
+            'processing_error': 'legacy result',
+        }, 'failed')
+
+        retrieved = self.client.get(f'/api/documents/{document_id}/result')
+        self.assertEqual(retrieved.status_code, 200)
+        self.assertIsNone(json.loads(retrieved.data)['identity_match'])
+
+    def test_existing_schema_is_migrated_with_nullable_identity_match(self):
+        legacy_db = os.path.join(self.test_dir, 'legacy.db')
+        connection = sqlite3.connect(legacy_db)
+        connection.executescript("""
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                original_filename TEXT NOT NULL,
+                stored_filename TEXT NOT NULL,
+                file_type TEXT NOT NULL,
+                file_size_bytes INTEGER,
+                upload_timestamp TEXT NOT NULL,
+                processing_status TEXT NOT NULL DEFAULT 'uploaded'
+            );
+            CREATE TABLE processing_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id TEXT NOT NULL UNIQUE,
+                document_type TEXT,
+                confidence REAL,
+                extracted_text TEXT,
+                extracted_fields TEXT,
+                ocr_engine TEXT,
+                ocr_confidence REAL,
+                processing_error TEXT,
+                processed_at TEXT NOT NULL,
+                FOREIGN KEY (document_id) REFERENCES documents(id)
+            );
+        """)
+        connection.commit()
+        connection.close()
+
+        init_db(legacy_db)
+        connection = sqlite3.connect(legacy_db)
+        columns = {
+            row[1]
+            for row in connection.execute('PRAGMA table_info(processing_results)')
+        }
+        connection.close()
+        self.assertIn('identity_match', columns)

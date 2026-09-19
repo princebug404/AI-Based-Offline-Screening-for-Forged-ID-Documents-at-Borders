@@ -637,7 +637,8 @@ class TestProcessingAPI(unittest.TestCase):
         result = json.loads(response.data)
         self.assertFalse(result['success'])
         self.assertEqual(result['processing_status'], 'failed')
-        self.assertIn('Unexpected OCR failure', result['error'])
+        self.assertEqual(result['error'], 'Document processing failed')
+        self.assertNotIn('Unexpected OCR failure', response.data.decode())
 
         status = self.client.get(f'/api/documents/{doc_id}/status')
         self.assertEqual(json.loads(status.data)['processing_status'], 'failed')

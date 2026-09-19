@@ -45,19 +45,35 @@ class Ledger:
         Verify the integrity of the entire chain.
 
         Checks that:
-        1. Each block's stored hash matches its recomputed hash.
-        2. Each block's previous_hash matches the preceding block's hash.
+        1. The chain contains an intact genesis block.
+        2. Each block has the expected sequential index.
+        3. Each block's stored hash matches its recomputed hash.
+        4. Each block's previous_hash matches the preceding block's hash.
+
+        Removing an interior block or reordering blocks breaks the index or
+        hash-link checks. Removing the final block cannot be detected without
+        an external expected length or persisted checkpoint.
 
         Returns:
             True if the chain is valid, False otherwise.
         """
-        for i in range(1, len(self.chain)):
-            current = self.chain[i]
-            previous = self.chain[i - 1]
+        if not self.chain:
+            return False
 
-            # Recompute the current block's hash and compare
+        for i, current in enumerate(self.chain):
+            if current.index != i:
+                return False
+
             if current.hash != current.compute_block_hash():
                 return False
+
+            if i == 0:
+                if current.previous_hash != "0":
+                    return False
+                continue
+
+            current = self.chain[i]
+            previous = self.chain[i - 1]
 
             # Verify the chain link
             if current.previous_hash != previous.hash:

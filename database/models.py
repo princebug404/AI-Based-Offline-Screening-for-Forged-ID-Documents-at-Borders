@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS processing_results (
     ocr_engine       TEXT,
     ocr_confidence   REAL,
     processing_error TEXT,
+    identity_match   TEXT,
     processed_at     TEXT NOT NULL,
     FOREIGN KEY (document_id) REFERENCES documents(id)
 )
