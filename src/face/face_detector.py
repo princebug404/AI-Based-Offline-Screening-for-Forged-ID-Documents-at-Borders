@@ -42,7 +42,7 @@ class FaceDetector:
 		image = self.decode_image(source)
 		return image, self._get_model().get(image)
 
-	def detect_document_portrait(self, source, padding_ratio=0.35):
+	def detect_document_portrait(self, source, padding_ratio=0.5):
 		"""Extract and redetect the single portrait region from a document image."""
 		image, document_faces = self.detect(source)
 		if len(document_faces) != 1:
@@ -60,4 +60,11 @@ class FaceDetector:
 		if portrait.size == 0:
 			return None, []
 
-		return portrait, self._get_model().get(portrait)
+		portrait_faces = self._get_model().get(portrait)
+		if len(portrait_faces) == 1:
+			return portrait, portrait_faces
+
+		# Fallback: if redetection on the cropped patch did not isolate exactly one face
+		# (e.g. tight boundary or detector scale sensitivity on small crop), preserve
+		# the confirmed single face detected on the full document.
+		return image, document_faces

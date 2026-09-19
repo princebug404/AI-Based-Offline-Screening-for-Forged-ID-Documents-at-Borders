@@ -28,6 +28,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+_OCR_TARGET_MAX_DIMENSION = 800
+_OCR_MAX_SCALE = 3.0
+
 
 class OCREngine:
     """
@@ -112,22 +115,26 @@ class OCREngine:
             return result
 
         try:
-            # --- Load and preprocess image ---
+            # --- Load and preprocess a working copy ---
             image = Image.open(image_path)
 
             # Convert palette/RGBA images to RGB for consistency
             if image.mode in ('P', 'RGBA', 'LA'):
                 image = image.convert('RGB')
 
-            preprocessed = self._preprocess(image)
+            original_size = image.size
+            image = self._prepare_working_image(image)
+            was_upscaled = image.size != original_size
+
+            # Grayscale preserves stroke gradients for Tesseract LSTM; use as primary
+            preprocessed = image.convert('L')
 
             # --- Run Tesseract OCR ---
             raw_text = pytesseract.image_to_string(preprocessed)
             ocr_image = preprocessed
             if not raw_text.strip():
-                # Some photographed documents lose all text during thresholding.
-                # Retry the original grayscale image before treating OCR as empty.
-                ocr_image = image.convert('L')
+                # Try thresholded working-copy representation if grayscale returns no text.
+                ocr_image = self._preprocess(image)
                 raw_text = pytesseract.image_to_string(ocr_image)
             text = raw_text.strip()
 
@@ -143,6 +150,21 @@ class OCREngine:
             result["error"] = f"OCR extraction failed: {str(e)}"
 
         return result
+
+    @staticmethod
+    def _prepare_working_image(pil_image):
+        """Upscale small images conservatively without modifying the source file."""
+        width, height = pil_image.size
+        largest_dimension = max(width, height)
+        if largest_dimension >= _OCR_TARGET_MAX_DIMENSION:
+            return pil_image
+
+        scale = min(
+            _OCR_MAX_SCALE,
+            _OCR_TARGET_MAX_DIMENSION / largest_dimension,
+        )
+        resized_size = (round(width * scale), round(height * scale))
+        return pil_image.resize(resized_size, Image.Resampling.LANCZOS)
 
     def _preprocess(self, pil_image):
         """

@@ -174,12 +174,13 @@ class DocumentProcessingService:
 
         extracted_text = ocr_result["text"]
 
-        # --- 5. Extract structured fields ---
-        fields = self.field_extractor.extract_fields(extracted_text)
-        redacted_fields = self._redact_fields(fields)
-
-        # --- 6. Classify document type ---
+        # --- 5. Classify document type ---
         classification = self.classifier.classify(extracted_text, image_path=file_path)
+
+        # --- 6. Extract structured fields ---
+        doc_type = classification.get("document_type")
+        fields = self.field_extractor.extract_fields(extracted_text, document_type=doc_type)
+        redacted_fields = self._redact_fields(fields)
 
         if not extracted_text or not extracted_text.strip():
             return self._save_failed_result(

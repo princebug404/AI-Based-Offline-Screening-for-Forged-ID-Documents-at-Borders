@@ -39,12 +39,13 @@ _DOC_NUMBER_PATTERN = re.compile(
 
 _PASSPORT_NUMBER_PATTERN = re.compile(
     r'\bpassport\s*(?:no\.?|number|#)\s*[:\-]?\s*'
-    r'([A-Z0-9][A-Z0-9-]{4,24})\b',
+    r'(?:[A-Z0-9]+\s+){0,5}'
+    r'([A-Z0-9]+(?:-[A-Z0-9]+)+|[A-Z]\d{4,17})\b',
     re.IGNORECASE,
 )
 
 _AADHAAR_NUMBER_PATTERN = re.compile(
-    r'(?<!\d)(\d{4}(?:[\s-]\d{4}){2}|\d{12})(?!\d)'
+    r'(?<!\d)(\d{4}(?:[ -]\d{4}){2}|\d{12})(?!\d)'
 )
 
 # --- Name label patterns ---
@@ -56,15 +57,23 @@ _NAME_LABEL_PATTERN = re.compile(
 
 # --- DOB label patterns ---
 _DOB_LABEL_PATTERN = re.compile(
-    r'(?:date\s*of\s*birth|d\.?o\.?b\.?|born|birth\s*date|'
+    r'(?:date\s*of\s*birth(?:\s*/\s*d\.?o\.?b\.?)?|d\.?o\.?b\.?|born|birth\s*date|'
     r'year\s*of\s*birth|y\.?o\.?b\.?|naissance)'
-    r'\s*[:\-]?\s*'
+    r'\s*[:/\-]?[^\d\n]*?'
     r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}'
     r'|\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2}'
     r'|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4}'
     r'|\d{4})',
     re.IGNORECASE,
 )
+
+_AADHAAR_STOPWORDS = {
+    'government of india', 'unique identification authority of india',
+    'enrolment no', 'enrollment no', 'republic of india', 'income tax department',
+    'election commission', 'transport department', 'driving licence', 'driving license',
+    'male', 'female', 'transgender', 'aadhaar', 'aadhar', 'your aadhaar no',
+    'help', 'signature', 'address', 'valid', 'qr code', 'authority',
+}
 
 # --- Expiry label patterns ---
 _EXPIRY_LABEL_PATTERN = re.compile(
@@ -119,7 +128,7 @@ class FieldExtractor:
                 "field_count": 0,
             }
 
-        name = self._extract_name(ocr_text)
+        name = self._extract_name(ocr_text, document_type)
         dob = self._extract_dob(ocr_text)
         doc_number = self._extract_document_number(ocr_text, document_type)
         expiry = self._extract_expiry_date(ocr_text)
@@ -140,8 +149,8 @@ class FieldExtractor:
 
         return fields
 
-    def _extract_name(self, text):
-        """Extract a person name from labeled text patterns."""
+    def _extract_name(self, text, document_type=None):
+        """Extract a person name from labeled text patterns or document context."""
         match = _NAME_LABEL_PATTERN.search(text)
         if match:
             name = match.group(1).strip()
@@ -151,6 +160,46 @@ class FieldExtractor:
             name = name.split('\n')[0].strip()
             if len(name) >= 2:
                 return name
+
+        # Aadhaar cards and letters frequently omit an explicit "Name:" label.
+        is_aadhaar = (
+            document_type == 'aadhaar' or
+            re.search(r'\b(?:aadhaar|aadhar|unique\s*identification|uidai)\b', text, re.IGNORECASE) is not None
+        )
+        if is_aadhaar:
+            # Case A: Aadhaar letter format ("To\n<Name>\n[S/O...]")
+            to_match = re.search(
+                r'(?:\bTo\b)\s*\n+([A-Za-z][A-Za-z\s\.\-]{2,50})(?=\s*\n+\s*(?:[S/CDW]/?O|C/o|s/o|d/o|w/o|PO:|Village|Flat|House|Near|Opp|[0-9]))',
+                text,
+                re.IGNORECASE,
+            )
+            if to_match:
+                cand = to_match.group(1).strip()
+                if len(cand) >= 2 and cand.lower() not in _AADHAAR_STOPWORDS:
+                    return cand
+
+            # Case B: Standard Aadhaar card layout (Name above DOB/Gender/Aadhaar number)
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            anchor_idx = None
+            for i, line in enumerate(lines):
+                if re.search(r'\b(?:dob|date\s*of\s*birth|year\s*of\s*birth|yob)\b', line, re.I):
+                    anchor_idx = i
+                    break
+                if re.search(r'\b(?:male|female)\b', line, re.I) and anchor_idx is None:
+                    anchor_idx = i
+                if re.search(r'\b(?:your\s*aadhaar\s*no|aadhaar\s*no)\b', line, re.I) and anchor_idx is None:
+                    anchor_idx = i
+
+            if anchor_idx is not None:
+                for i in range(anchor_idx - 1, -1, -1):
+                    cand = lines[i].strip()
+                    if re.match(r'^[A-Za-z][A-Za-z\s\.\-]{1,49}$', cand):
+                        cand_lower = cand.lower()
+                        if not any(sw in cand_lower for sw in _AADHAAR_STOPWORDS):
+                            words = cand.split()
+                            if 1 <= len(words) <= 5 and all(len(w) >= 2 for w in words):
+                                return cand
+
         return None
 
     def _extract_dob(self, text):

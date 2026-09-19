@@ -69,14 +69,14 @@ class FaceVerifier:
 		return embedding / norm
 
 	@staticmethod
-	def _usable_face(image, face):
+	def _usable_face(image, face, min_size=50):
 		if float(getattr(face, 'det_score', 0.0)) < 0.5:
 			return False
 
 		x1, y1, x2, y2 = face.bbox.astype(int)
 		x1, y1 = max(0, x1), max(0, y1)
 		x2, y2 = min(image.shape[1], x2), min(image.shape[0], y2)
-		if x2 - x1 < 80 or y2 - y1 < 80:
+		if x2 - x1 < min_size or y2 - y1 < min_size:
 			return False
 
 		crop = image[y1:y2, x1:x2]

@@ -15,6 +15,13 @@
       "document_number": "SYNTH-P-000001",
       "name": "SHARMA",
       "date_of_birth": "08/04/1987"
+    },
+    {
+      "record_id": "SYN-PASSPORT-002",
+      "document_type": "passport",
+      "document_number": "DEMO-P-000001",
+      "name": "Arjun Sharma",
+      "date_of_birth": "1987-04-08"
     }
   ]
 }

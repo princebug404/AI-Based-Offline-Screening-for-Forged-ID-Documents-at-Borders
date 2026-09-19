@@ -103,6 +103,20 @@ class TestFaceVerifier(unittest.TestCase):
 		self.assertEqual(result['comparison_status'], 'Manual Review')
 		self.assertIn('low quality', result['reason'])
 
+	def test_document_portrait_usable_at_standard_id_size(self):
+		"""A standard ID document portrait (e.g. 65x65 px) should be usable."""
+		face = _face([1.0, 0.0], score=0.85)
+		face.bbox = np.array([10, 10, 75, 75], dtype=np.float32)  # 65x65 px
+		image = np.random.default_rng(42).integers(0, 256, size=(100, 100, 3), dtype=np.uint8)
+		self.assertTrue(FaceVerifier._usable_face(image, face, min_size=50))
+
+	def test_face_below_minimum_size_rejected(self):
+		"""A portrait smaller than minimum size (e.g. 35x35 px) should be rejected."""
+		face = _face([1.0, 0.0], score=0.85)
+		face.bbox = np.array([10, 10, 45, 45], dtype=np.float32)  # 35x35 px
+		image = np.random.default_rng(42).integers(0, 256, size=(100, 100, 3), dtype=np.uint8)
+		self.assertFalse(FaceVerifier._usable_face(image, face, min_size=50))
+
 
 class TestFaceComparisonRoute(unittest.TestCase):
 	def setUp(self):

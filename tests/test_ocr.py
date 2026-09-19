@@ -121,6 +121,12 @@ class TestFieldExtractor(unittest.TestCase):
         fields = self.extractor.extract_fields(text, document_type='passport')
         self.assertEqual(fields['document_number'], 'DEMO-P-000001')
 
+    def test_extract_passport_number_after_ocr_label_tokens(self):
+        """Should skip OCR label tokens before the fictional passport number."""
+        text = "Passport No.\nPASSPORT P IND DEMO-P-000001"
+        fields = self.extractor.extract_fields(text, document_type='passport')
+        self.assertEqual(fields['document_number'], 'DEMO-P-000001')
+
     def test_unreadable_synthetic_fields_remain_none(self):
         """Unreadable Aadhaar values should not be invented from nearby text."""
         text = "AADHAAR CARD\nName: KAVYA MEHTA\nYear of Birth: unreadable\nAadhaar Number: unavailable"
@@ -350,6 +356,31 @@ class TestOCREngine(unittest.TestCase):
         self.assertEqual(result['text'], 'RECOVERED PASSPORT TEXT')
         self.assertEqual(result['confidence'], 77.6)
         self.assertEqual(mock_ocr.call_count, 2)
+
+    def test_small_synthetic_aadhaar_image_is_readable_after_upscaling(self):
+        """Small fictional Aadhaar-style text should reach OCR at a readable size."""
+        image = Image.new('RGB', (240, 140), 'white')
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.truetype('C:/Windows/Fonts/arial.ttf', 8)
+        lines = [
+            'GOVERNMENT OF INDIA',
+            'AADHAAR CARD',
+            'Name: KAVYA MEHTA',
+            'Year of Birth: 1995',
+            'Aadhaar Number: 1111 2222 3333',
+        ]
+        for index, line in enumerate(lines):
+            draw.text((6, 12 + index * 20), line, fill='black', font=font)
+        path = _save_test_image(image, self.test_dir, 'small_synthetic_aadhaar.png')
+
+        if not self.engine.is_available()['available']:
+            self.skipTest('Tesseract is not available')
+
+        result = self.engine.extract_text(path)
+
+        self.assertTrue(result['success'])
+        self.assertIn('AADHAAR', result['text'].upper())
+        self.assertIn('1111', result['text'])
 
     def test_extract_text_no_tesseract_gives_clear_error(self):
         """If Tesseract is not installed, the error message should be clear."""
@@ -846,6 +877,116 @@ class TestProcessingResultEndpoint(unittest.TestCase):
         """Results for a nonexistent document should return 404."""
         resp = self.client.get('/api/documents/fake-id/result')
         self.assertEqual(resp.status_code, 404)
+
+
+class TestAadhaarRegressionSuite(unittest.TestCase):
+    """Focused regression tests for Aadhaar field extraction, layouts, and pipeline."""
+
+    def setUp(self):
+        self.extractor = FieldExtractor()
+        self.test_dir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.test_dir, 'test.db')
+        self.upload_folder = os.path.join(self.test_dir, 'uploads')
+        self.app = create_app({
+            'TESTING': True,
+            'DATABASE_PATH': self.db_path,
+            'UPLOAD_FOLDER': self.upload_folder,
+            'ALLOWED_EXTENSIONS': {'png', 'jpg', 'jpeg', 'bmp', 'tiff'},
+        })
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_extract_unlabeled_standard_aadhaar_fields(self):
+        """A standard Aadhaar card without 'Name:' label should extract name and compound DOB."""
+        text = (
+            "Government of India\n"
+            "Unique Identification Authority of India\n"
+            "Enrolment No.: 1234/56789/01234\n"
+            "Kavya Mehta\n"
+            "Your Aadhaar No\n"
+            "Date of Birth/DOB: 15/08/1995\n"
+            "Male/ MALE\n"
+            "1111 2222 3333"
+        )
+        fields = self.extractor.extract_fields(text, document_type='aadhaar')
+        self.assertEqual(fields['name'], 'Kavya Mehta')
+        self.assertEqual(fields['date_of_birth'], '15/08/1995')
+        self.assertEqual(fields['document_number'], '1111 2222 3333')
+        self.assertIsNone(fields['expiry_date'])
+        self.assertEqual(fields['field_count'], 3)
+
+    def test_extract_aadhaar_letter_format_name(self):
+        """An Aadhaar letter format with To\\n<Name>\\nS/O should extract the name."""
+        text = (
+            "Government of India\n"
+            "Aadhaar\n"
+            "To\n"
+            "Arjun Sharma\n"
+            "S/O Ramesh Sharma\n"
+            "PO: Central City\n"
+            "Your Aadhaar No. : 1111 2222 3333\n"
+            "Date of Birth: 08/04/1987"
+        )
+        fields = self.extractor.extract_fields(text, document_type='aadhaar')
+        self.assertEqual(fields['name'], 'Arjun Sharma')
+        self.assertEqual(fields['date_of_birth'], '08/04/1987')
+        self.assertEqual(fields['document_number'], '1111 2222 3333')
+
+    def test_bilingual_dob_pattern_matching(self):
+        """Bilingual DOB patterns like 'DOB / जन्म तारीख: DD/MM/YYYY' should extract clean date."""
+        for text, expected in [
+            ("Date of Birth/DOB: 03/03/2008", "03/03/2008"),
+            ("DOB: 15/03/1990", "15/03/1990"),
+            ("DOB / जन्म तारीख: 25-12-1985", "25-12-1985"),
+            ("Year of Birth: 1995", "1995"),
+        ]:
+            with self.subTest(text=text):
+                fields = self.extractor.extract_fields(text, document_type='aadhaar')
+                self.assertEqual(fields['date_of_birth'], expected)
+
+    @patch('backend.services.document_services.OCREngine')
+    def test_aadhaar_pipeline_synthetic_identity_matching(self, MockOCREngine):
+        """An uploaded synthetic Aadhaar image should classify, extract 3 fields, and match synthetic record."""
+        MockOCREngine.return_value.extract_text.return_value = {
+            "success": True,
+            "text": (
+                "Government of India\n"
+                "Unique Identification Authority of India\n"
+                "Enrolment No.: 1234/56789/01234\n"
+                "KAVYA MEHTA\n"
+                "Date of Birth/DOB: 1995\n"
+                "1111 2222 3333"
+            ),
+            "error": None,
+            "engine": "tesseract",
+            "confidence": 92.0,
+        }
+
+        img = Image.new('RGB', (400, 300), 'white')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+
+        upload_resp = self.client.post(
+            '/api/documents/upload',
+            data={'file': (buf, 'synthetic_aadhaar.png')},
+            content_type='multipart/form-data',
+        )
+        doc_id = json.loads(upload_resp.data)['document_id']
+
+        proc_resp = self.client.post(f'/api/documents/{doc_id}/process')
+        self.assertEqual(proc_resp.status_code, 200)
+        res = json.loads(proc_resp.data)
+
+        self.assertEqual(res['document_type'], 'aadhaar')
+        self.assertEqual(res['extracted_fields']['name'], '[REDACTED]')
+        self.assertEqual(res['extracted_fields']['date_of_birth'], '[REDACTED]')
+        self.assertEqual(res['extracted_fields']['document_number'], '[REDACTED]')
+        self.assertEqual(res['extracted_fields']['field_count'], 3)
+        self.assertEqual(res['identity_match']['status'], 'Match')
+        self.assertEqual(res['identity_match']['record_id'], 'SYN-AADHAAR-001')
 
 
 if __name__ == '__main__':
